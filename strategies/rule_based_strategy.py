@@ -24,25 +24,28 @@ class MovingAverageCrossover:
         Returns:
             str: 'BUY', 'SELL', or 'HOLD'.
         """
-        if len(data) < self.long_period:
+        # create a copy to avoid the SettingWithCopyWarning
+        df = data.copy()
+
+        if len(df) < self.long_period:
             return 'HOLD'
         
         # Calculate Moving Averages
-        data['short_ma'] = data['close'].rolling(window=self.short_period).mean()
-        data['long_ma'] = data['close'].rolling(window=self.long_period).mean()
+        df['short_ma'] = df['close'].rolling(window=self.short_period).mean()
+        df['long_ma'] = df['close'].rolling(window=self.long_period).mean()
 
         # Check for crossover at the latest point
         # Make sure the last two values are not NaN before comparison
-        if not pd.isna(data['short_ma'].iloc[-2]) and not pd.isna(data['long_ma'].iloc[-2]):
+        if not pd.isna(df['short_ma'].iloc[-2]) and not pd.isna(df['long_ma'].iloc[-2]):
             # Check for BUY signal: short MA crosses above long MA
-            if data['short_ma'].iloc[-2] < data['long_ma'].iloc[-2] and \
-               data['short_ma'].iloc[-1] > data['long_ma'].iloc[-1]:
+            if df['short_ma'].iloc[-2] < df['long_ma'].iloc[-2] and \
+               df['short_ma'].iloc[-1] > df['long_ma'].iloc[-1]:
                 if self.last_signal != 'BUY':
                     self.last_signal = 'BUY'
                     return 'BUY'
             # Check for SELL signal: short MA crosses below long MA
-            elif data['short_ma'].iloc[-2] > data['long_ma'].iloc[-2] and \
-                 data['short_ma'].iloc[-1] < data['long_ma'].iloc[-1]:
+            elif df['short_ma'].iloc[-2] > df['long_ma'].iloc[-2] and \
+                 df['short_ma'].iloc[-1] < df['long_ma'].iloc[-1]:
                 if self.last_signal != 'SELL':
                     self.last_signal = 'SELL'
                     return 'SELL'
