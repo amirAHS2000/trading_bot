@@ -1,7 +1,9 @@
 import MetaTrader5 as mt5
-from config.settings import MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER, SYMBOL, TIMEFRAME, SL_PIPS, TP_PIPS
-from datetime import datetime
+import pandas as pd
+from config.settings import MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER, SYMBOL, TIMEFRAME, STOP_LOSS_PIPS, TAKE_PROFIT_PIPS
+from utils.logger import setup_logger
 
+logger = setup_logger()
 
 def initialize_mt5():
     """
@@ -9,18 +11,18 @@ def initialize_mt5():
     This function should be called only once at the start of the bot.
     """
     if not mt5.initialize(path="C:\\Program Files\\MetaTrader 5\\terminal64.exe"):
-        print("initialize() failed, error code =", mt5.last_error())
+        logger.error(f"initialize() failed, error code = {mt5.last_error()}")
         return False
     
-    print("MetaTrader 5 initialized successfully.")
+    logger.info("MetaTrader 5 initialized successfully.")
 
     # Attempt to login
     if not mt5.login(int(MT5_ACCOUNT), MT5_PASSWORD, MT5_SERVER):
-        print("login() failed, error code =", mt5.last_error())
+        logger.error(f"login() failed, error code = {mt5.last_error()}")
         mt5.shutdown()
         return False
     
-    print("Logged in successfully.")
+    logger.info("Logged in successfully.")
     return True
 
 def get_latest_price(symbol=SYMBOL):
@@ -29,13 +31,13 @@ def get_latest_price(symbol=SYMBOL):
         # Request tick data
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
-            print(f"Failed to get tick for {symbol}")
+            logger.error(f"Failed to get tick for {symbol}")
             return None
         
         price = tick.bid
         return price
     except Exception as e:
-        print(f"An error occurred while fetching price: {e}")
+        logger.error(f"An error occurred while fetching price: {e}")
         return None
 
 def get_historical_data(symbol=SYMBOL, timeframe=mt5.TIMEFRAME_M15, num_candles=100):
@@ -45,7 +47,7 @@ def get_historical_data(symbol=SYMBOL, timeframe=mt5.TIMEFRAME_M15, num_candles=
         rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, num_candles)
         return rates
     except Exception as e:
-        print(f"An error occurred while fetching historical data: {e}")
+        logger.error(f"An error occurred while fetching historical data: {e}")
         return None
 
 def calculate_sl_tp_prices(symbol, order_type):
@@ -65,12 +67,12 @@ def calculate_sl_tp_prices(symbol, order_type):
     
     if order_type == mt5.ORDER_TYPE_BUY:
         price = tick.ask
-        sl_price = price - SL_PIPS * point
-        tp_price = price + TP_PIPS * point
+        sl_price = price - STOP_LOSS_PIPS * point
+        tp_price = price + TAKE_PROFIT_PIPS * point
     elif order_type == mt5.ORDER_TYPE_SELL:
         price = tick.bid
-        sl_price = price + SL_PIPS * point
-        tp_price = price - TP_PIPS * point
+        sl_price = price + STOP_LOSS_PIPS * point
+        tp_price = price - TAKE_PROFIT_PIPS * point
     else:
         return None, None
     
@@ -91,7 +93,7 @@ def open_position(symbol, lot_size, order_type, magic_number):
     """
     sl, tp = calculate_sl_tp_prices(symbol, order_type)
     if sl is None or tp is None:
-        print("Failed to calculate SL/TP prices.")
+        logger.error("Failed to calculate SL/TP prices.")
         return False
     
     # Create the trade request
@@ -115,13 +117,13 @@ def open_position(symbol, lot_size, order_type, magic_number):
 
     # Check the execution result
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        print(f"Failed to open position. Error code: {result.retcode}")
-        print(f"Request: {request}")
+        logger.error(f"Failed to open position. Error code: {result.retcode}")
+        logger.error(f"Request: {request}")
         return False
     else:
-        print(f"Successfully sent a {result.type} order for {symbol}.")
-        print(f"Position opened with ticket #{result.order} at price {result.price}.")
-        print(f"SL: {sl}, TP: {tp}")
+        logger.info(f"Successfully sent a {result.type} order for {symbol}.")
+        logger.info(f"Position opened with ticket #{result.order} at price {result.price}.")
+        logger.info(f"SL: {sl}, TP: {tp}")
         return True
 
 def close_position(position_id):
@@ -165,8 +167,8 @@ def close_position(position_id):
 
     # Check the execution result
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        print(f"Failed to close position {position_id}. Error code: {result.retcode}")
+        logger.error(f"Failed to close position {position_id}. Error code: {result.retcode}")
         return False
     else:
-        print(f"Successfully closed position {position_id}.")
+        logger.info(f"Successfully closed position {position_id}.")
         return True
