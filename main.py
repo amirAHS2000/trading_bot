@@ -1,7 +1,7 @@
 import time
 import pandas as pd
 import MetaTrader5 as mt5
-from config.settings import SYMBOL, LOT_SIZE, MAGIC_NUMBER
+from config.settings import SYMBOL, LOT_SIZE, MAGIC_NUMBER, STOP_LOSS_PIPS, TAKE_PROFIT_PIPS
 from utils.data_fetcher import initialize_mt5, get_historical_data, open_position, close_position
 from strategies.rule_based_strategy import MovingAverageCrossover
 from utils.logger import setup_logger
@@ -11,7 +11,7 @@ logger = setup_logger()
 
 # Backtesting parameters
 INITIAL_BALANCE = 10000.0
-SIMULATED_COMMISSION = 2.0 # Commission per trade
+SIMULATED_COMMISSION = 2.0  # Commission per trade
 
 def get_open_position():
     """
@@ -32,6 +32,8 @@ class SimulatedTradeManager:
         self.position = None
         self.entry_price = 0.0
         self.entry_time = None
+        self.sl_price = 0.0
+        self.tp_price = 0.0
         self.trades = []
 
     def open_position(self, signal, price, time):
@@ -39,7 +41,17 @@ class SimulatedTradeManager:
             self.position = signal
             self.entry_price = price
             self.entry_time = time
-            logger.info(f"SIMULATED TRADE OPENED - {signal} at {price} on {time}")
+            
+            # Simulate SL/TP calculation for backtesting
+            point = mt5.symbol_info(SYMBOL).point
+            if signal == "BUY":
+                self.sl_price = price - STOP_LOSS_PIPS * point
+                self.tp_price = price + TAKE_PROFIT_PIPS * point
+            elif signal == "SELL":
+                self.sl_price = price + STOP_LOSS_PIPS * point
+                self.tp_price = price - TAKE_PROFIT_PIPS * point
+
+            logger.info(f"SIMULATED TRADE OPENED - {signal} at {price} on {time} (SL: {self.sl_price:.5f}, TP: {self.tp_price:.5f})")
         
     def close_position(self, price, time):
         if self.position is not None:
@@ -91,7 +103,20 @@ def run_backtest():
         current_price = rates_df.iloc[i]['close']
         current_time = rates_df.iloc[i]['time']
 
-        # Check for close conditions
+        # --- New Backtest Close Logic ---
+        # 1. Check for SL/TP hit
+        if trade_manager.position is not None:
+            if (trade_manager.position == "BUY" and current_price <= trade_manager.sl_price) or \
+               (trade_manager.position == "SELL" and current_price >= trade_manager.sl_price):
+                trade_manager.close_position(trade_manager.sl_price, current_time)
+                continue  # Skip to next candle to avoid multiple closures
+            
+            if (trade_manager.position == "BUY" and current_price >= trade_manager.tp_price) or \
+               (trade_manager.position == "SELL" and current_price <= trade_manager.tp_price):
+                trade_manager.close_position(trade_manager.tp_price, current_time)
+                continue
+
+        # 2. Check for counter-signal
         if trade_manager.position == "BUY" and signal == "SELL":
             trade_manager.close_position(current_price, current_time)
         elif trade_manager.position == "SELL" and signal == "BUY":
@@ -110,7 +135,7 @@ def run_live_bot():
     """Main function to run the trading bot in live mode."""
 
     # Initialize strategy
-    strategy = MovingAverageCrossover(short_period=9, long_period=21)
+    strategy = MovingAverageCrossover()
 
     logger.info("Starting trading bot in live mode...")
 
@@ -146,10 +171,10 @@ def run_live_bot():
                 if current_position is None:
                     if signal == 'BUY':
                         logger.info("BUY signal received. Opening a new long position.")
-                        open_position(SYMBOL, LOT_SIZE, mt5.ORDER_TYPE_BUY, MAGIC_NUMBER)
+                        open_position(SYMBOL, LOT_SIZE, mt5.ORDER_TYPE_BUY, MAGIC_NUMBER, STOP_LOSS_PIPS, TAKE_PROFIT_PIPS)
                     elif signal == 'SELL':
                         logger.info("SELL signal received. Opening a new short position.")
-                        open_position(SYMBOL, LOT_SIZE, mt5.ORDER_TYPE_SELL, MAGIC_NUMBER)
+                        open_position(SYMBOL, LOT_SIZE, mt5.ORDER_TYPE_SELL, MAGIC_NUMBER, STOP_LOSS_PIPS, TAKE_PROFIT_PIPS)
             
             # Pause for a specified interval before the next iteration
             time.sleep(60) # Pause for 60 seconds (adjust as needed)
