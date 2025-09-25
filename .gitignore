@@ -7,12 +7,3 @@ __pycache__/
 venv/
 .env/
 .env
-
-config/settings.py
-
-logs/
-
-MQL5/Logs/
-MQL5/Experts/Logs/
-MQL5/Files/
-MQL5/Tester/

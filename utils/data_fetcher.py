@@ -1,29 +1,25 @@
 import MetaTrader5 as mt5
 import pandas as pd
-from config.settings import MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER, SYMBOL, TIMEFRAME, STOP_LOSS_PIPS, TAKE_PROFIT_PIPS
+import os
+import time
+from datetime import datetime
+from config.settings import MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER, SYMBOL, TIMEFRAME, STOP_LOSS_PIPS, TAKE_PROFIT_PIPS, LOT
 from utils.logger import setup_logger
+from config import settings
 
 logger = setup_logger()
 
-def initialize_mt5():
-    """
-    Initializes and connects to MetaTrader 5.
-    This function should be called only once at the start of the bot.
-    """
-    if not mt5.initialize(path="C:\\Program Files\\MetaTrader 5\\terminal64.exe"):
-        logger.error(f"initialize() failed, error code = {mt5.last_error()}")
-        return False
-    
-    logger.info("MetaTrader 5 initialized successfully.")
-
-    # Attempt to login
-    if not mt5.login(int(MT5_ACCOUNT), MT5_PASSWORD, MT5_SERVER):
-        logger.error(f"login() failed, error code = {mt5.last_error()}")
-        mt5.shutdown()
-        return False
-    
-    logger.info("Logged in successfully.")
-    return True
+def initialize_mt5(max_retries=3, retry_delay=10):
+    for attempt in range(max_retries):
+        if mt5.initialize(path=settings.BROKER['terminal_path']):
+            if mt5.login(int(settings.BROKER['account']), settings.BROKER['password'], settings.BROKER['server']):
+                logger.info('MT5 initialized and logged in.')
+                return True
+            mt5.shutdown()
+        logger.warning(f'MT5 initialization failed, attempt {attempt + 1}/{max_retries}')
+        time.sleep(retry_delay)
+    logger.error('Failed to initialize MT5 after retries.')
+    return False
 
 def get_latest_price(symbol=SYMBOL):
     """Fetches the latest tick data for a given symbol."""
@@ -49,6 +45,28 @@ def get_historical_data(symbol=SYMBOL, timeframe=mt5.TIMEFRAME_M15, num_candles=
     except Exception as e:
         logger.error(f"An error occurred while fetching historical data: {e}")
         return None
+    
+def save_historical_data(symbol, timeframe, num_candles, save_dir='data/raw_data'):
+    rates = get_historical_data(symbol, timeframe, num_candles)
+    if rates is None:
+        return None
+    df = pd.DataFrame(rates)
+    df['time'] = pd.to_datetime(df['time'], units='s')
+    os.makedirs(save_dir, exist_ok=True)
+    filename = f"{save_dir}/{symbol}_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    df.to_csv(filename, index=False)
+    logger.info(f'Saved historical data to {filename}')
+    return rates
+
+def calculate_lot_size(symbol, account_equity, risk_percent=1.0, stop_loss_pips=STOP_LOSS_PIPS):
+    symbol_info = mt5.symbol_info(symbol)
+    if symbol_info is None:
+        return settings.TRADING['lot_size'] # fallback
+    point = symbol_info.point
+    pip_value = symbol_info.trade_tick_value
+    risk_amount = account_equity * (risk_percent / 100)
+    lot_size = risk_amount / (stop_loss_pips * pip_value)
+    return round(lot_size, 2)
 
 def calculate_sl_tp_prices(symbol, order_type):
     """
@@ -91,6 +109,15 @@ def open_position(symbol, lot_size, order_type, magic_number):
     Returns:
         bool: True if the order was sent successfully, False otherwise.
     """
+    account_info = mt5.account_info()
+
+    if account_info:
+        lot_size = calculate_lot_size(symbol, account_info.equity)
+
+    if account_info.margin_free < lot_size * mt5.symbol_info(symbol).margin_initial:
+        logger.error('Insufficient margin to open position')
+        return False
+    
     sl, tp = calculate_sl_tp_prices(symbol, order_type)
     if sl is None or tp is None:
         logger.error("Failed to calculate SL/TP prices.")

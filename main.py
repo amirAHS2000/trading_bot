@@ -1,10 +1,13 @@
 import time
 import pandas as pd
 import MetaTrader5 as mt5
-from config.settings import SYMBOL, LOT_SIZE, MAGIC_NUMBER, STOP_LOSS_PIPS, TAKE_PROFIT_PIPS
+from config.settings import SYMBOL, LOT_SIZE, MAGIC_NUMBER, STOP_LOSS_PIPS, TAKE_PROFIT_PIPS, STRATEGIES, ACTIVE_STRATEGY
 from utils.data_fetcher import initialize_mt5, get_historical_data, open_position, close_position
+from utils.performance import calculate_metrics, plot_equity_curve
 from strategies.rule_based_strategy import MovingAverageCrossover
+from strategies.advanced_strategy import MLStrategy
 from utils.logger import setup_logger
+from strategies.factor import create_strategy
 
 # Initialize the logger
 logger = setup_logger()
@@ -36,22 +39,20 @@ class SimulatedTradeManager:
         self.tp_price = 0.0
         self.trades = []
 
-    def open_position(self, signal, price, time):
+    def open_position(self, signal, price, time, spread=2.0):
         if self.position is None:
             self.position = signal
-            self.entry_price = price
-            self.entry_time = time
-            
-            # Simulate SL/TP calculation for backtesting
             point = mt5.symbol_info(SYMBOL).point
-            if signal == "BUY":
-                self.sl_price = price - STOP_LOSS_PIPS * point
-                self.tp_price = price + TAKE_PROFIT_PIPS * point
-            elif signal == "SELL":
-                self.sl_price = price + STOP_LOSS_PIPS * point
-                self.tp_price = price - TAKE_PROFIT_PIPS * point
-
-            logger.info(f"SIMULATED TRADE OPENED - {signal} at {price} on {time} (SL: {self.sl_price:.5f}, TP: {self.tp_price:.5f})")
+            if signal == 'BUY':
+                self.entry_price = price + spread * point # pay the ask price
+                self.sl_price = self.entry_price - STOP_LOSS_PIPS * point
+                self.tp_price = self.entry_price + TAKE_PROFIT_PIPS * point
+            elif signal == 'SELL':
+                self.entry_price = price # Sell at bid price
+                self.sl_price = self.entry_price + STOP_LOSS_PIPS * point
+                self.tp_price = self.entry_price - TAKE_PROFIT_PIPS * point
+            self.entry_time = time
+            logger.info(f'SIMULATED TRADE OPENED - {signal} at {self.entry_price:.5f}')
         
     def close_position(self, price, time):
         if self.position is not None:
@@ -130,6 +131,10 @@ def run_backtest():
                 trade_manager.open_position("SELL", current_price, current_time)
 
     logger.info(f"Backtest finished. Final Balance: {trade_manager.balance:.2f}")
+    metrics = calculate_metrics(trade_manager.trades, INITIAL_BALANCE)
+    logger.info(f"Performance Metrics: Total Return: {metrics['total_return']:.2f}%, "
+                f"Win Rate: {metrics['win_rate']:.2f}%, Max Drawdown: {metrics['max_drawdown']:.2f}%")
+    plot_equity_curve(trade_manager.trades)    
 
 def run_live_bot():
     """Main function to run the trading bot in live mode."""
@@ -186,6 +191,18 @@ def main():
     if not initialize_mt5():
         logger.error("Failed to initialize and connect to MetaTrader 5.")
         return
+    
+    strategy_config = STRATEGIES.get(ACTIVE_STRATEGY, {})
+    strategy = create_strategy(ACTIVE_STRATEGY, **strategy_config)
+
+    # # Dynamically select strategy
+    # if ACTIVE_STRATEGY == 'rule_based':
+    #     strategy = MovingAverageCrossover()
+    # elif ACTIVE_STRATEGY == 'ml_strategy':
+    #     strategy = MLStrategy()
+    # else:
+    #     logger.error('Invalid strategy selected.')
+    #     return
     
     # run_live_bot() # For live, continuous trading
     run_backtest() # For backtesting

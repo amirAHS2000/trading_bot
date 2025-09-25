@@ -1,8 +1,10 @@
 import pandas as pd
 import numpy as np
 
+from .base_strategy import BaseStrategy
 
-class MovingAverageCrossover:
+
+class MovingAverageCrossover(BaseStrategy):
     """
     A simple Moving Average Crossover strategy.
 
@@ -11,9 +13,9 @@ class MovingAverageCrossover:
     """
 
     def __init__(self, short_period=9, long_period=21):
+        super().__init__()
         self.short_period = short_period
         self.long_period = long_period
-        self.last_signal = None  # To prevent repeated signals
 
     def generate_signal(self, data):
         """
